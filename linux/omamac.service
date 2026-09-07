@@ -1,11 +1,11 @@
 [Unit]
-Description=clipspan: two-way clipboard sync with a Mac over SSH
+Description=omamac: two-way clipboard sync with a Mac over SSH
 After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
-Environment=CLIPSPAN_HOST=my-mac
-ExecStart=%h/.local/bin/clipspan
+Environment=OMAMAC_HOST=my-mac
+ExecStart=%h/.local/bin/omamac
 Restart=always
 RestartSec=5
 

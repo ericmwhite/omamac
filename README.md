@@ -1,4 +1,4 @@
-# clipspan
+# OmaMac
 
 One clipboard across a Linux desktop and a Mac. Copy on either machine, paste
 on the other. Text and images. If your Mac and iPhone share an Apple ID,
@@ -23,13 +23,13 @@ Wayland desktop with `wl-clipboard` should work.
 ```
  Linux (Wayland)                         Mac
  ─────────────────                       ──────────────────────────
- wl-paste --watch ──── ssh "Clipspan set" ───▶ pasteboard
- wl-copy ◀──── ssh "Clipspan stream" ───────── pasteboard change counter
+ wl-paste --watch ──── ssh "OmaMac set" ───▶ pasteboard
+ wl-copy ◀──── ssh "OmaMac stream" ───────── pasteboard change counter
 ```
 
 - Linux to Mac: `wl-paste --watch` fires on every clipboard change and pushes
   the content to the Mac over SSH.
-- Mac to Linux: one long-lived SSH session runs `Clipspan stream`, which
+- Mac to Linux: one long-lived SSH session runs `OmaMac stream`, which
   prints a line whenever the Mac clipboard changes. Nothing polls from the
   Linux side, so idle CPU is effectively zero on both machines.
 - A "last synced" file stops changes bouncing back and forth.
@@ -55,11 +55,11 @@ Wayland desktop with `wl-clipboard` should work.
 ### 1. Mac
 
 ```
-git clone https://github.com/ericmwhite/clipspan.git ~/dev/clipspan
-~/dev/clipspan/build.sh install
+git clone https://github.com/ericmwhite/omamac.git ~/dev/omamac
+~/dev/omamac/build.sh install
 ```
 
-That compiles `Clipspan.app`, signs it, copies it to `~/Applications`, and
+That compiles `OmaMac.app`, signs it, copies it to `~/Applications`, and
 starts it. A clipboard icon appears in the menu bar. Optional, but worth
 doing from that menu:
 
@@ -75,13 +75,13 @@ every rebuild. With a certificate the grant sticks.
 ### 2. Linux
 
 ```
-git clone https://github.com/ericmwhite/clipspan.git ~/Projects/clipspan
-~/Projects/clipspan/linux/install.sh your-mac
+git clone https://github.com/ericmwhite/omamac.git ~/Projects/omamac
+~/Projects/omamac/linux/install.sh your-mac
 ```
 
 `your-mac` is whatever you type after `ssh`. The installer checks the
-connection, copies the script to `~/.local/bin/clipspan`, and enables a
-systemd user service called `clipspan`. Copy something on either machine and
+connection, copies the script to `~/.local/bin/omamac`, and enables a
+systemd user service called `omamac`. Copy something on either machine and
 paste on the other.
 
 ## Using the Mac app
@@ -94,10 +94,10 @@ paste on the other.
 - Images are recorded and shown in the overlay, with thumbnails in the menu.
 - **Pause Recording**, **Clear History**, and **Remember History Across
   Restarts** are in the menu. History lives in
-  `~/Library/Application Support/Clipspan/` with owner-only permissions.
+  `~/Library/Application Support/OmaMac/` with owner-only permissions.
   Turn "Remember" off and nothing is written to disk.
 
-Settings, changed with `defaults write it.letsponder.clipspan <key> <value>`:
+Settings, changed with `defaults write it.letsponder.omamac <key> <value>`:
 
 | key | default | meaning |
 |---|---|---|
@@ -125,9 +125,9 @@ a URL. That keeps spreadsheet cells syncing as text rather than as a picture.
 The Mac binary is also a small clipboard tool, which is what the sync uses:
 
 ```
-Clipspan stream   # one line per clipboard change, forever: t:<base64 text> or i:<base64 png>
-Clipspan set      # stdin -> clipboard (UTF-8 text, or PNG bytes)
-Clipspan get      # clipboard -> stdout (text, or PNG bytes)
+OmaMac stream   # one line per clipboard change, forever: t:<base64 text> or i:<base64 png>
+OmaMac set      # stdin -> clipboard (UTF-8 text, or PNG bytes)
+OmaMac get      # clipboard -> stdout (text, or PNG bytes)
 ```
 
 `stream` checks the pasteboard change counter in-process every 0.3 seconds
@@ -138,25 +138,25 @@ nothing behind.
 ## Troubleshooting
 
 ```
-systemctl --user status clipspan          # is the Linux side running?
-journalctl --user -u clipspan -n 50       # what did it say?
-ssh your-mac Applications/Clipspan.app/Contents/MacOS/Clipspan get   # can Linux reach the Mac app?
+systemctl --user status omamac          # is the Linux side running?
+journalctl --user -u omamac -n 50       # what did it say?
+ssh your-mac Applications/OmaMac.app/Contents/MacOS/OmaMac get   # can Linux reach the Mac app?
 ```
 
 - Nothing syncs Mac to Linux, but Linux to Mac works: the stream session
   died. The service reconnects within about ten seconds of the Mac being
-  reachable again; restart it with `systemctl --user restart clipspan`.
+  reachable again; restart it with `systemctl --user restart omamac`.
 - Shift-Cmd-V shows the overlay but does not paste: turn on Paste Directly
   and grant Accessibility. If you rebuilt an ad-hoc-signed app, remove
-  Clipspan from Accessibility in System Settings and grant it again.
+  OmaMac from Accessibility in System Settings and grant it again.
 - The Mac is asleep: nothing syncs until it wakes. Set the Mac to never
   sleep if it is a desktop.
 
 ## Uninstall
 
 - Linux: `linux/install.sh --uninstall`
-- Mac: quit Clipspan from its menu, delete `~/Applications/Clipspan.app` and
-  `~/Library/Application Support/Clipspan/`, and remove it from Login Items
+- Mac: quit OmaMac from its menu, delete `~/Applications/OmaMac.app` and
+  `~/Library/Application Support/OmaMac/`, and remove it from Login Items
   if you enabled that.
 
 ## License

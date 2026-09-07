@@ -23,7 +23,7 @@
 
     <rect x="630" y="260" width="340" height="200" rx="18" fill="#161c22" stroke="#2c3640" stroke-width="2"/>
     <text x="800" y="316" text-anchor="middle" font-size="30" font-weight="600" fill="#f2f4f6">Mac</text>
-    <text x="800" y="356" text-anchor="middle" fill="#9aa5b1">Clipspan: menu-bar history</text>
+    <text x="800" y="356" text-anchor="middle" fill="#9aa5b1">OmaMac: menu-bar history</text>
     <text x="800" y="392" text-anchor="middle" fill="#7dd3a0" font-family="'JetBrains Mono', 'DejaVu Sans Mono', monospace" font-size="18">Shift-Cmd-V, like Flycut</text>
     <text x="800" y="424" text-anchor="middle" fill="#7dd3a0" font-family="'JetBrains Mono', 'DejaVu Sans Mono', monospace" font-size="18">text + images, 1 Swift file</text>
 
