@@ -2,10 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleName</key><string>Clipwatch</string>
-	<key>CFBundleDisplayName</key><string>Clipwatch</string>
-	<key>CFBundleIdentifier</key><string>it.letsponder.clipwatch</string>
-	<key>CFBundleExecutable</key><string>Clipwatch</string>
+	<key>CFBundleName</key><string>Clipspan</string>
+	<key>CFBundleDisplayName</key><string>Clipspan</string>
+	<key>CFBundleIdentifier</key><string>it.letsponder.clipspan</string>
+	<key>CFBundleExecutable</key><string>Clipspan</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>0.1</string>
 	<key>CFBundleVersion</key><string>1</string>

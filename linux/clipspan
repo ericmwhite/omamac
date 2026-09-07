@@ -1,17 +1,29 @@
 #!/usr/bin/env bash
-# Two-way text clipboard sync between this machine and the Mac, over SSH (Tailscale).
+# clipspan: two-way clipboard sync between this Linux machine and a Mac over SSH.
+#
 # Linux -> Mac: two wl-paste --watch processes (text and PNG) push every clipboard
-#   change to `Clipwatch set`.
-# Mac -> Linux: one long-lived SSH session runs `Clipwatch stream`, which prints a
+#   change to `Clipspan set` on the Mac.
+# Mac -> Linux: one long-lived SSH session runs `Clipspan stream`, which prints a
 #   line ("t:<base64 text>" or "i:<base64 png>") whenever the Mac clipboard
-#   changes. Nothing polls from this side.
+#   changes. Nothing polls from this side, so idle cost is close to zero.
 # A shared "last" file records whatever was synced most recently, in either
 # direction, so nothing bounces back and forth.
-# Clipwatch lives in ~/Projects/clipwatch and is installed on the Mac in ~/Applications.
+#
+# Configuration (environment, normally set in the systemd unit by install.sh):
+#   CLIPSPAN_HOST   SSH host name of the Mac (required)
+#   CLIPSPAN_APP    path of the Clipspan binary on the Mac, relative to its home
+#                   (default: Applications/Clipspan.app/Contents/MacOS/Clipspan)
 set -u
-HOST="${CLIPSYNC_HOST:-erics-mac-mini}"
-CLIPWATCH="${CLIPSYNC_CLIPWATCH:-Applications/Clipwatch.app/Contents/MacOS/Clipwatch}"
-STATE="${XDG_RUNTIME_DIR:-/tmp}/clipsync-mac"
+HOST="${CLIPSPAN_HOST:-}"
+APP="${CLIPSPAN_APP:-Applications/Clipspan.app/Contents/MacOS/Clipspan}"
+STATE="${XDG_RUNTIME_DIR:-/tmp}/clipspan"
+MAX_BYTES=20971520   # 20 MB, matches the cap in the Mac app
+
+if [ -z "$HOST" ]; then
+  echo "clipspan: CLIPSPAN_HOST is not set; run linux/install.sh <mac-ssh-host>" >&2
+  exit 1
+fi
+
 mkdir -p "$STATE"
 LAST="$STATE/last"
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=3
@@ -22,10 +34,10 @@ if [ "${1:-}" = "--push" ]; then
   [ "${CLIPBOARD_STATE:-}" = "sensitive" ] && exit 0   # password-manager copies stay local
   cat > "$STATE/local"
   [ -s "$STATE/local" ] || exit 0
-  [ "$(stat -c %s "$STATE/local")" -le 20971520 ] || exit 0   # skip images over 20 MB
+  [ "$(stat -c %s "$STATE/local")" -le "$MAX_BYTES" ] || exit 0
   cmp -s "$STATE/local" "$LAST" && exit 0
   cp "$STATE/local" "$LAST"
-  "${SSH[@]}" "$CLIPWATCH" set < "$STATE/local"
+  "${SSH[@]}" "$APP" set < "$STATE/local"
   exit 0
 fi
 
@@ -36,12 +48,12 @@ wl-paste --type image/png --watch "$0" --push &
 WATCH_IMAGE=$!
 trap 'kill $WATCH_TEXT $WATCH_IMAGE 2>/dev/null; "${SSH[@]}" -O exit 2>/dev/null; exit 0' INT TERM
 
-# `Clipwatch stream` exits when its stdin closes (that is how it notices a dropped
+# `Clipspan stream` exits when its stdin closes (that is how it notices a dropped
 # SSH session), so feed it a fifo that stays open instead of systemd's /dev/null.
 rm -f "$STATE/keepalive"; mkfifo "$STATE/keepalive"; exec 3<>"$STATE/keepalive"
 
 while :; do
-  "${SSH[@]}" "$CLIPWATCH" stream <&3 | while IFS= read -r line; do
+  "${SSH[@]}" "$APP" stream <&3 | while IFS= read -r line; do
     printf '%s' "${line#??}" | base64 -d > "$STATE/remote" || continue
     [ -s "$STATE/remote" ] || continue
     cmp -s "$STATE/remote" "$LAST" && continue

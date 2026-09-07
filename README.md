@@ -1,44 +1,103 @@
-# Clipwatch
+# clipspan
 
-A small, private clipboard history for the Mac menu bar (text and images), with
-optional two-way clipboard sync to a Linux machine over SSH. Built to replace Flycut with
-something you can read in one sitting.
+One clipboard across a Linux desktop and a Mac. Copy on either machine, paste
+on the other. Text and images. If your Mac and iPhone share an Apple ID,
+Universal Clipboard carries it on to the phone for free.
 
-**Privacy is the whole point.** The app contains no network code, no analytics,
-no update checker, and no dependencies. History is a JSON file in
-`~/Library/Application Support/Clipwatch/` (mode 0600) that you can turn off or
-clear from the menu. Anything a password manager marks as concealed or
-transient is never recorded. Syncing, if you use it, rides on your own SSH
-connection; the app never opens a socket.
+It is deliberately small and private:
 
-Whole thing is one Swift file (`Sources/main.swift`) plus a shell script.
+- **No cloud, no accounts, no server.** The two machines talk over your own
+  SSH connection. Tailscale makes that work from anywhere; a LAN works too.
+- **No network code in the Mac app.** It only ever touches the pasteboard and
+  a local history file. Read the one Swift file and you have read it all.
+- **Password-manager copies never leave the machine** they were made on.
+  Anything a manager marks as concealed is also kept out of history.
+- The Mac app doubles as a **menu-bar clipboard history**, with the
+  Flycut-style Shift-Cmd-V cycle-and-paste, so you can retire Flycut.
 
-## Mac app
+Built for [Omarchy](https://omarchy.org) (Hyprland on Wayland), but any
+Wayland desktop with `wl-clipboard` should work.
 
-Requires macOS 13 or later and Xcode (or the Command Line Tools) to build.
+## How it works
 
 ```
-./build.sh install
+ Linux (Wayland)                         Mac
+ ─────────────────                       ──────────────────────────
+ wl-paste --watch ──── ssh "Clipspan set" ───▶ pasteboard
+ wl-copy ◀──── ssh "Clipspan stream" ───────── pasteboard change counter
 ```
 
-That compiles `Clipwatch.app`, ad-hoc signs it, copies it to `~/Applications`,
-and starts it. A clipboard icon appears in the menu bar.
+- Linux to Mac: `wl-paste --watch` fires on every clipboard change and pushes
+  the content to the Mac over SSH.
+- Mac to Linux: one long-lived SSH session runs `Clipspan stream`, which
+  prints a line whenever the Mac clipboard changes. Nothing polls from the
+  Linux side, so idle CPU is effectively zero on both machines.
+- A "last synced" file stops changes bouncing back and forth.
 
-- Click the icon to see recent items in a menu.
-- **Shift-Cmd-V** works like Flycut: an overlay shows the newest item, each further
-  tap of V or the right arrow (with Cmd still held) moves one item older, the
-  left arrow moves newer, and releasing Cmd pastes the one showing. Escape
-  cancels.
-- Images are recorded too (as PNG, up to 20 MB each). When a copy carries both
-  an image and text, text wins unless the text is only a URL, which is what
-  browsers attach to a copied picture.
-- Picking from the menu copies the item. If
-  you enable **Paste Directly** and grant Accessibility access, it is also
-  pasted into the app you were using.
-- **Pause Recording**, **Clear History**, **Remember History Across Restarts**,
-  and **Launch at Login** are in the menu.
+## Requirements
 
-Defaults you can change with `defaults write it.letsponder.clipwatch <key> <value>`:
+- **Mac:** macOS 13 or later, and Xcode or the Command Line Tools to build.
+- **Linux:** a Wayland desktop, `wl-clipboard`, `ssh`, and `systemd` user
+  sessions (Omarchy has all of these).
+- **Passwordless SSH from Linux to the Mac.** Turn on Remote Login in the
+  Mac's Sharing settings, then from Linux:
+
+  ```
+  ssh-keygen -t ed25519            # if you have no key yet
+  ssh-copy-id you@your-mac
+  ssh your-mac true                # must succeed without a prompt
+  ```
+
+  Give the Mac a stable name in `~/.ssh/config` or use its Tailscale name.
+
+## Install
+
+### 1. Mac
+
+```
+git clone https://github.com/ericmwhite/clipspan.git ~/dev/clipspan
+~/dev/clipspan/build.sh install
+```
+
+That compiles `Clipspan.app`, signs it, copies it to `~/Applications`, and
+starts it. A clipboard icon appears in the menu bar. Optional, but worth
+doing from that menu:
+
+- **Paste Directly** lets Shift-Cmd-V paste into the app you are using. It
+  needs Accessibility permission, which macOS will prompt for.
+- **Launch at Login** keeps it running.
+
+The build signs with a "Developer ID Application" or "Apple Development"
+certificate if you have one, otherwise ad-hoc. macOS ties the Accessibility
+grant to the signature, so an ad-hoc-signed app must be re-granted after
+every rebuild. With a certificate the grant sticks.
+
+### 2. Linux
+
+```
+git clone https://github.com/ericmwhite/clipspan.git ~/Projects/clipspan
+~/Projects/clipspan/linux/install.sh your-mac
+```
+
+`your-mac` is whatever you type after `ssh`. The installer checks the
+connection, copies the script to `~/.local/bin/clipspan`, and enables a
+systemd user service called `clipspan`. Copy something on either machine and
+paste on the other.
+
+## Using the Mac app
+
+- Click the menu-bar icon for the recent items. Pick one to copy it (and paste
+  it, if Paste Directly is on). Keys 1 to 9 pick while the menu is open.
+- **Shift-Cmd-V** works like Flycut: an overlay shows the newest item. With
+  Cmd still held, tap V or the right arrow to move older, the left arrow to
+  move newer. Release Cmd to paste the one showing. Escape cancels.
+- Images are recorded and shown in the overlay, with thumbnails in the menu.
+- **Pause Recording**, **Clear History**, and **Remember History Across
+  Restarts** are in the menu. History lives in
+  `~/Library/Application Support/Clipspan/` with owner-only permissions.
+  Turn "Remember" off and nothing is written to disk.
+
+Settings, changed with `defaults write it.letsponder.clipspan <key> <value>`:
 
 | key | default | meaning |
 |---|---|---|
@@ -47,44 +106,58 @@ Defaults you can change with `defaults write it.letsponder.clipwatch <key> <valu
 | `menuItems` | 30 | items shown in the menu |
 | `persist` | true | save history to disk |
 
+## What syncs
+
+| Copied | Result |
+|---|---|
+| Plain text, any length | Syncs exactly |
+| Rich text | Syncs as plain text; formatting dropped |
+| Screenshot or copied image | Syncs as PNG, up to 20 MB |
+| Image with a URL attached (browser copies) | The image wins |
+| Password-manager copies | Stay local |
+| Files, folders, video, audio | Do not sync (the clipboard only holds a path) |
+
+When a copy carries both an image and text, text wins unless the text is only
+a URL. That keeps spreadsheet cells syncing as text rather than as a picture.
+
 ## Command-line modes
 
-The same binary doubles as a clipboard tool, which is what the sync uses:
+The Mac binary is also a small clipboard tool, which is what the sync uses:
 
 ```
-Clipwatch stream   # one line per clipboard change, forever: t:<base64 text> or i:<base64 png>
-Clipwatch set      # stdin -> clipboard (UTF-8 text, or PNG bytes)
-Clipwatch get      # clipboard -> stdout (text, or PNG bytes)
+Clipspan stream   # one line per clipboard change, forever: t:<base64 text> or i:<base64 png>
+Clipspan set      # stdin -> clipboard (UTF-8 text, or PNG bytes)
+Clipspan get      # clipboard -> stdout (text, or PNG bytes)
 ```
 
-`stream` polls the pasteboard change counter in-process every 0.3 seconds
-(macOS has no clipboard change notification; every clipboard manager does this)
-and exits when its stdin closes, so a dropped SSH session leaves nothing behind.
+`stream` checks the pasteboard change counter in-process every 0.3 seconds
+(macOS has no clipboard change notification; every clipboard manager does
+this) and exits when its stdin closes, so a dropped SSH session leaves
+nothing behind.
 
-## Linux sync (Wayland)
-
-`linux/clipsync-mac` keeps the Linux clipboard and the Mac clipboard in step.
-It needs `wl-clipboard` and passwordless SSH to the Mac (Tailscale works well).
-
-- Linux to Mac: `wl-paste --watch` (one watcher for text, one for PNG) pushes
-  each change to `Clipwatch set`.
-- Mac to Linux: one long-lived SSH session runs `Clipwatch stream`, and each
-  line is decoded into `wl-copy`. Nothing polls from the Linux side, so idle
-  cost is effectively zero.
-- A "last synced" file stops changes bouncing back and forth.
-- Copies flagged as sensitive by a password manager stay on the machine they
-  were made on.
-
-Install:
+## Troubleshooting
 
 ```
-cp linux/clipsync-mac ~/.local/bin/
-cp linux/clipsync-mac.service ~/.config/systemd/user/
-systemctl --user enable --now clipsync-mac
+systemctl --user status clipspan          # is the Linux side running?
+journalctl --user -u clipspan -n 50       # what did it say?
+ssh your-mac Applications/Clipspan.app/Contents/MacOS/Clipspan get   # can Linux reach the Mac app?
 ```
 
-Set `CLIPSYNC_HOST` in the unit's `Environment=` if your Mac is not called
-`erics-mac-mini`. Text and PNG images sync; other image formats do not.
+- Nothing syncs Mac to Linux, but Linux to Mac works: the stream session
+  died. The service reconnects within about ten seconds of the Mac being
+  reachable again; restart it with `systemctl --user restart clipspan`.
+- Shift-Cmd-V shows the overlay but does not paste: turn on Paste Directly
+  and grant Accessibility. If you rebuilt an ad-hoc-signed app, remove
+  Clipspan from Accessibility in System Settings and grant it again.
+- The Mac is asleep: nothing syncs until it wakes. Set the Mac to never
+  sleep if it is a desktop.
+
+## Uninstall
+
+- Linux: `linux/install.sh --uninstall`
+- Mac: quit Clipspan from its menu, delete `~/Applications/Clipspan.app` and
+  `~/Library/Application Support/Clipspan/`, and remove it from Login Items
+  if you enabled that.
 
 ## License
 

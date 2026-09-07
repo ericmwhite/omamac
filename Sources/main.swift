@@ -1,12 +1,12 @@
-// Clipwatch: a small, private clipboard history for the Mac menu bar.
+// Clipspan: a small, private clipboard history for the Mac menu bar.
 //
-//   Clipwatch          run the menu-bar app
-//   Clipwatch stream   print each clipboard change as one line: "t:<base64 utf8>" or "i:<base64 png>"
-//   Clipwatch set      read stdin (PNG bytes or UTF-8 text) and put it on the clipboard
-//   Clipwatch get      print the current clipboard (PNG bytes or text)
+//   Clipspan          run the menu-bar app
+//   Clipspan stream   print each clipboard change as one line: "t:<base64 utf8>" or "i:<base64 png>"
+//   Clipspan set      read stdin (PNG bytes or UTF-8 text) and put it on the clipboard
+//   Clipspan get      print the current clipboard (PNG bytes or text)
 //
 // There is no network code in this file. History lives in
-// ~/Library/Application Support/Clipwatch/ (mode 0600/0700) and can be turned
+// ~/Library/Application Support/Clipspan/ (mode 0600/0700) and can be turned
 // off from the menu. Items that a password manager marks as concealed or
 // transient are never recorded or streamed.
 
@@ -239,7 +239,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     var storeDir: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Clipwatch", isDirectory: true)
+            .appendingPathComponent("Clipspan", isDirectory: true)
     }
     var storeURL: URL { storeDir.appendingPathComponent("history.json") }
     var imagesDir: URL { storeDir.appendingPathComponent("images", isDirectory: true) }
@@ -249,7 +249,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         load()
         changeCount = pb.changeCount
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Clipwatch")
+        statusItem.button?.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Clipspan")
         menu.delegate = self
         statusItem.menu = menu
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.poll() }
@@ -415,7 +415,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let hint = NSMenuItem(title: "Shift-Cmd-V: hold ⌘, tap V or arrows to cycle, release to paste", action: nil, keyEquivalent: "")
         hint.isEnabled = false
         menu.addItem(hint)
-        menu.addItem(NSMenuItem(title: "Quit Clipwatch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit Clipspan", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
     func addToggle(_ title: String, _ action: Selector, on: Bool) {
@@ -466,7 +466,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Unmanaged<App>.fromOpaque(userData!).takeUnretainedValue().hotKeyPressed()
             return noErr
         }, 1, &spec, me, nil)
-        let id = EventHotKeyID(signature: 0x434C5057, id: 1) // "CLPW"
+        let id = EventHotKeyID(signature: 0x434C5350, id: 1) // "CLSP"
         RegisterEventHotKey(UInt32(kVK_ANSI_V), UInt32(cmdKey | shiftKey), id,
                             GetApplicationEventTarget(), 0, &hotKeyRef)
     }
@@ -532,7 +532,7 @@ case "stream": runStream()
 case "set": runSet()
 case "get": runGet()
 case "-h", "--help", "help":
-    print("usage: Clipwatch [stream|set|get]   (no argument runs the menu-bar app)")
+    print("usage: Clipspan [stream|set|get]   (no argument runs the menu-bar app)")
     exit(0)
 default: break
 }

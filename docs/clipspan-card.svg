@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" font-family="Inter, 'Liberation Sans', 'DejaVu Sans', sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101418"/><stop offset="1" stop-color="#1a2129"/>
+    </linearGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7dd3a0"/>
+    </marker>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+
+  <!-- title -->
+  <text x="80" y="118" font-size="52" font-weight="700" fill="#f2f4f6">One clipboard across Omarchy, a Mac, and an iPhone</text>
+  <text x="80" y="168" font-size="26" fill="#9aa5b1">Built in 47 minutes with Claude Code. No cloud, no accounts, nothing to trust but your own SSH key.</text>
+
+  <!-- device boxes -->
+  <g font-size="22">
+    <rect x="80" y="260" width="340" height="200" rx="18" fill="#161c22" stroke="#2c3640" stroke-width="2"/>
+    <text x="250" y="316" text-anchor="middle" font-size="30" font-weight="600" fill="#f2f4f6">Omarchy (Linux)</text>
+    <text x="250" y="356" text-anchor="middle" fill="#9aa5b1">Hyprland / Wayland</text>
+    <text x="250" y="392" text-anchor="middle" fill="#7dd3a0" font-family="'JetBrains Mono', 'DejaVu Sans Mono', monospace" font-size="18">wl-paste --watch → ssh</text>
+    <text x="250" y="424" text-anchor="middle" fill="#7dd3a0" font-family="'JetBrains Mono', 'DejaVu Sans Mono', monospace" font-size="18">one systemd user service</text>
+
+    <rect x="630" y="260" width="340" height="200" rx="18" fill="#161c22" stroke="#2c3640" stroke-width="2"/>
+    <text x="800" y="316" text-anchor="middle" font-size="30" font-weight="600" fill="#f2f4f6">Mac</text>
+    <text x="800" y="356" text-anchor="middle" fill="#9aa5b1">Clipspan: menu-bar history</text>
+    <text x="800" y="392" text-anchor="middle" fill="#7dd3a0" font-family="'JetBrains Mono', 'DejaVu Sans Mono', monospace" font-size="18">Shift-Cmd-V, like Flycut</text>
+    <text x="800" y="424" text-anchor="middle" fill="#7dd3a0" font-family="'JetBrains Mono', 'DejaVu Sans Mono', monospace" font-size="18">text + images, 1 Swift file</text>
+
+    <rect x="1180" y="260" width="340" height="200" rx="18" fill="#161c22" stroke="#2c3640" stroke-width="2"/>
+    <text x="1350" y="316" text-anchor="middle" font-size="30" font-weight="600" fill="#f2f4f6">iPhone</text>
+    <text x="1350" y="356" text-anchor="middle" fill="#9aa5b1">came along for free</text>
+    <text x="1350" y="392" text-anchor="middle" fill="#7dd3a0" font-family="'JetBrains Mono', 'DejaVu Sans Mono', monospace" font-size="18">Apple Universal Clipboard</text>
+    <text x="1350" y="424" text-anchor="middle" fill="#7dd3a0" font-family="'JetBrains Mono', 'DejaVu Sans Mono', monospace" font-size="18">picks it up from the Mac</text>
+  </g>
+
+  <!-- links -->
+  <line x1="432" y1="345" x2="618" y2="345" stroke="#7dd3a0" stroke-width="3" marker-end="url(#arr)" marker-start="url(#arr)"/>
+  <text x="525" y="326" text-anchor="middle" font-size="18" fill="#c8d0d8">SSH over Tailscale</text>
+  <text x="525" y="380" text-anchor="middle" font-size="16" fill="#9aa5b1">both ways, event-driven</text>
+  <line x1="982" y1="345" x2="1168" y2="345" stroke="#7dd3a0" stroke-width="3" marker-end="url(#arr)"/>
+  <text x="1075" y="326" text-anchor="middle" font-size="18" fill="#c8d0d8">Handoff</text>
+  <text x="1075" y="380" text-anchor="middle" font-size="16" fill="#9aa5b1">nothing to build</text>
+
+  <!-- stats row -->
+  <g font-size="20" fill="#9aa5b1">
+    <text x="80" y="540" font-size="64" font-weight="700" fill="#f2f4f6">638</text><text x="80" y="572">lines, everything included</text>
+    <text x="460" y="540" font-size="64" font-weight="700" fill="#f2f4f6">6</text><text x="460" y="572">commits</text>
+    <text x="700" y="540" font-size="64" font-weight="700" fill="#f2f4f6">0</text><text x="700" y="572">network code in the app</text>
+    <text x="1060" y="540" font-size="64" font-weight="700" fill="#f2f4f6">~0%</text><text x="1060" y="572">CPU while idle</text>
+  </g>
+
+  <!-- timeline -->
+  <line x1="80" y1="700" x2="1520" y2="700" stroke="#2c3640" stroke-width="4"/>
+  <g font-size="17" fill="#c8d0d8" text-anchor="middle">
+    <!-- 13:30 .. 14:17 mapped over 80..1520 (47 min => 30.6 px/min) -->
+    <circle cx="80" cy="700" r="10" fill="#e6b450"/>
+    <circle cx="141" cy="700" r="10" fill="#7dd3a0"/>
+    <text x="80" y="740" font-weight="600" text-anchor="start">13:30 → 13:32</text><text x="80" y="764" fill="#9aa5b1" text-anchor="start">“Help!” to text syncing</text>
+    <circle cx="907" cy="700" r="10" fill="#7dd3a0"/>
+    <text x="907" y="740" font-weight="600">13:57</text><text x="907" y="764" fill="#9aa5b1">Mac app, Flycut retired</text>
+    <circle cx="1152" cy="700" r="10" fill="#7dd3a0"/>
+    <text x="1152" y="740" font-weight="600">14:05</text><text x="1152" y="764" fill="#9aa5b1">Flycut-style cycling</text>
+    <circle cx="1366" cy="700" r="10" fill="#7dd3a0"/>
+    <text x="1366" y="740" font-weight="600">14:12</text><text x="1366" y="764" fill="#9aa5b1">images</text>
+    <circle cx="1520" cy="700" r="10" fill="#7dd3a0"/>
+    <text x="1520" y="740" font-weight="600">14:17</text><text x="1520" y="764" fill="#9aa5b1">signed, done</text>
+  </g>
+  <text x="80" y="660" font-size="20" fill="#9aa5b1">Same afternoon, first message to last commit</text>
+
+  <text x="1520" y="860" text-anchor="end" font-size="18" fill="#5f6b78">Swift + AppKit on the Mac · bash + wl-clipboard on Linux · MIT</text>
+</svg>

@@ -1,10 +1,11 @@
 [Unit]
-Description=Two-way clipboard sync with the Mac mini over SSH
+Description=clipspan: two-way clipboard sync with a Mac over SSH
 After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
-ExecStart=%h/.local/bin/clipsync-mac
+Environment=CLIPSPAN_HOST=my-mac
+ExecStart=%h/.local/bin/clipspan
 Restart=always
 RestartSec=5
 
