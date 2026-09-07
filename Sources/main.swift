@@ -1,32 +1,79 @@
 // Clipwatch: a small, private clipboard history for the Mac menu bar.
 //
 //   Clipwatch          run the menu-bar app
-//   Clipwatch stream   print each new clipboard text as one base64 line (for syncing over SSH)
-//   Clipwatch set      read stdin and put it on the clipboard
-//   Clipwatch get      print the current clipboard text
+//   Clipwatch stream   print each clipboard change as one line: "t:<base64 utf8>" or "i:<base64 png>"
+//   Clipwatch set      read stdin (PNG bytes or UTF-8 text) and put it on the clipboard
+//   Clipwatch get      print the current clipboard (PNG bytes or text)
 //
 // There is no network code in this file. History lives in
-// ~/Library/Application Support/Clipwatch/history.json (mode 0600) and can be
-// turned off from the menu. Items that a password manager marks as concealed
-// or transient are never recorded or streamed.
+// ~/Library/Application Support/Clipwatch/ (mode 0600/0700) and can be turned
+// off from the menu. Items that a password manager marks as concealed or
+// transient are never recorded or streamed.
 
 import AppKit
 import Carbon
+import CryptoKit
 import ServiceManagement
 
 let concealedType = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
 let transientType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
+let maxImageBytes = 20 * 1024 * 1024
+let pngMagic: [UInt8] = [0x89, 0x50, 0x4E, 0x47]
 
-/// The clipboard's text, unless it is empty or marked private.
-func clipboardText(_ pb: NSPasteboard = .general) -> String? {
-    if let types = pb.types, types.contains(concealedType) || types.contains(transientType) { return nil }
-    guard let s = pb.string(forType: .string), !s.isEmpty else { return nil }
-    return s
+enum Content {
+    case text(String)
+    case image(Data)   // always PNG
 }
 
-func setClipboard(_ s: String, _ pb: NSPasteboard = .general) {
+/// The clipboard's content, unless it is empty or marked private.
+/// Text wins over an image unless the text is just a URL (browsers put the
+/// image's address alongside a copied picture).
+func clipboardContent(_ pb: NSPasteboard = .general) -> Content? {
+    let types = pb.types ?? []
+    if types.contains(concealedType) || types.contains(transientType) { return nil }
+    let text = pb.string(forType: .string).flatMap { $0.isEmpty ? nil : $0 }
+    let hasImage = types.contains(.png) || types.contains(.tiff)
+    if hasImage, text == nil || looksLikeURL(text!), let png = pngData(pb), png.count <= maxImageBytes {
+        return .image(png)
+    }
+    if let t = text { return .text(t) }
+    return nil
+}
+
+func looksLikeURL(_ s: String) -> Bool {
+    let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+    return !t.contains(where: \.isNewline) && !t.contains(" ")
+        && (t.hasPrefix("http://") || t.hasPrefix("https://") || t.hasPrefix("file://"))
+}
+
+func pngData(_ pb: NSPasteboard) -> Data? {
+    if let d = pb.data(forType: .png) { return d }
+    guard let tiff = pb.data(forType: .tiff), let rep = NSBitmapImageRep(data: tiff) else { return nil }
+    return rep.representation(using: .png, properties: [:])
+}
+
+func setClipboard(_ c: Content, _ pb: NSPasteboard = .general) {
     pb.clearContents()
-    pb.setString(s, forType: .string)
+    switch c {
+    case .text(let s):
+        pb.setString(s, forType: .string)
+    case .image(let png):
+        // Keep the exact PNG bytes (so a synced image round-trips unchanged)
+        // and add a TIFF for apps that only take that.
+        pb.setData(png, forType: .png)
+        if let rep = NSBitmapImageRep(data: png), let tiff = rep.tiffRepresentation {
+            pb.setData(tiff, forType: .tiff)
+        }
+    }
+}
+
+func contentFromBytes(_ data: Data) -> Content? {
+    if data.starts(with: pngMagic) { return data.count <= maxImageBytes ? .image(data) : nil }
+    return String(data: data, encoding: .utf8).map { .text($0) }
+}
+
+func sha256(_ d: Data) -> String {
+    SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined()
 }
 
 // MARK: - Command-line modes
@@ -45,8 +92,12 @@ func runStream() -> Never {
         let c = pb.changeCount
         if c == last { continue }
         last = c
-        guard let s = clipboardText(pb) else { continue }
-        let line = Data(s.utf8).base64EncodedString() + "\n"
+        guard let content = clipboardContent(pb) else { continue }
+        let line: String
+        switch content {
+        case .text(let s): line = "t:" + Data(s.utf8).base64EncodedString() + "\n"
+        case .image(let d): line = "i:" + d.base64EncodedString() + "\n"
+        }
         let ok = line.withCString { p in write(STDOUT_FILENO, p, strlen(p)) > 0 }
         if !ok { exit(0) }
     }
@@ -54,21 +105,31 @@ func runStream() -> Never {
 
 func runSet() -> Never {
     let data = FileHandle.standardInput.readDataToEndOfFile()
-    guard let s = String(data: data, encoding: .utf8) else { exit(1) }
-    setClipboard(s)
+    guard let c = contentFromBytes(data) else { exit(1) }
+    setClipboard(c)
     exit(0)
 }
 
 func runGet() -> Never {
-    if let s = clipboardText() { FileHandle.standardOutput.write(Data(s.utf8)) }
+    switch clipboardContent() {
+    case .text(let s)?: FileHandle.standardOutput.write(Data(s.utf8))
+    case .image(let d)?: FileHandle.standardOutput.write(d)
+    case nil: break
+    }
     exit(0)
 }
 
 // MARK: - Menu-bar app
 
 struct Item: Codable {
-    var text: String
+    var text: String?
+    var image: String?      // file name under images/, PNG
+    var hash: String?       // sha256 of the PNG, for de-duplication
+    var width: Int?
+    var height: Int?
     var date: Date
+
+    var isImage: Bool { image != nil }
 }
 
 /// The overlay shown while cycling with Shift-Cmd-V. It is a non-activating
@@ -76,6 +137,7 @@ struct Item: Codable {
 /// pasting into.
 final class Bezel: NSPanel {
     let body = NSTextField(wrappingLabelWithString: "")
+    let picture = NSImageView()
     let counter = NSTextField(labelWithString: "")
     var onMove: ((Int) -> Void)?
     var onCommit: (() -> Void)?
@@ -101,13 +163,19 @@ final class Bezel: NSPanel {
         effect.layer?.masksToBounds = true
         contentView = effect
 
-        body.frame = NSRect(x: 28, y: 56, width: rect.width - 56, height: rect.height - 84)
+        let inner = NSRect(x: 28, y: 56, width: rect.width - 56, height: rect.height - 84)
+        body.frame = inner
         body.font = .systemFont(ofSize: 16)
         body.textColor = .labelColor
         body.maximumNumberOfLines = 11
         body.lineBreakMode = .byTruncatingTail
         body.cell?.truncatesLastVisibleLine = true
         effect.addSubview(body)
+
+        picture.frame = inner
+        picture.imageScaling = .scaleProportionallyDown
+        picture.imageAlignment = .alignCenter
+        effect.addSubview(picture)
 
         counter.frame = NSRect(x: 28, y: 20, width: rect.width - 56, height: 20)
         counter.font = .systemFont(ofSize: 12)
@@ -118,9 +186,12 @@ final class Bezel: NSPanel {
 
     override var canBecomeKey: Bool { true }
 
-    func show(text: String, index: Int, count: Int) {
-        body.stringValue = text
-        counter.stringValue = "\(index + 1) of \(count)   ·   tap V for older, release ⌘ to paste, esc to cancel"
+    func show(text: String?, image: NSImage?, index: Int, count: Int) {
+        body.stringValue = text ?? ""
+        body.isHidden = image != nil
+        picture.image = image
+        picture.isHidden = image == nil
+        counter.stringValue = "\(index + 1) of \(count)   ·   V or → older, ← newer, release ⌘ to paste, esc to cancel"
         if !isVisible, let screen = NSScreen.main {
             let f = screen.visibleFrame
             setFrameOrigin(NSPoint(x: f.midX - frame.width / 2, y: f.midY - frame.height / 2))
@@ -133,8 +204,8 @@ final class Bezel: NSPanel {
         switch Int(event.keyCode) {
         case kVK_Escape: onCancel?()
         case kVK_Return, kVK_ANSI_KeypadEnter: onCommit?()
-        case kVK_DownArrow: onMove?(1)
-        case kVK_UpArrow: onMove?(-1)
+        case kVK_DownArrow, kVK_RightArrow: onMove?(1)
+        case kVK_UpArrow, kVK_LeftArrow: onMove?(-1)
         case kVK_ANSI_V where !cmd: onMove?(1)   // with ⌘ held the hot key handles it
         default: break
         }
@@ -151,6 +222,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let menu = NSMenu()
     var statusItem: NSStatusItem!
     var items: [Item] = []
+    var imageCache: [String: Data] = [:]
     var changeCount = 0
     var pollTimer: Timer?
     var saveTimer: Timer?
@@ -160,6 +232,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var modifierWatch: Timer?
 
     var maxItems: Int { max(1, defaults.object(forKey: "maxItems") as? Int ?? 100) }
+    var maxImages: Int { max(0, defaults.object(forKey: "maxImages") as? Int ?? 20) }
     var menuItemCount: Int { max(1, defaults.object(forKey: "menuItems") as? Int ?? 30) }
     var persist: Bool { defaults.object(forKey: "persist") as? Bool ?? true }
     var paused: Bool { defaults.bool(forKey: "paused") }
@@ -169,6 +242,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .appendingPathComponent("Clipwatch", isDirectory: true)
     }
     var storeURL: URL { storeDir.appendingPathComponent("history.json") }
+    var imagesDir: URL { storeDir.appendingPathComponent("images", isDirectory: true) }
+    func imageURL(_ name: String) -> URL { imagesDir.appendingPathComponent(name) }
 
     func applicationDidFinishLaunching(_ note: Notification) {
         load()
@@ -191,15 +266,55 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if c == changeCount { return }
         changeCount = c
         if paused { return }
-        guard let s = clipboardText(pb) else { return }
-        add(s)
+        guard let content = clipboardContent(pb) else { return }
+        add(content)
     }
 
-    func add(_ text: String) {
-        items.removeAll { $0.text == text }
-        items.insert(Item(text: text, date: Date()), at: 0)
-        if items.count > maxItems { items.removeLast(items.count - maxItems) }
+    func add(_ content: Content) {
+        switch content {
+        case .text(let s):
+            items.removeAll { $0.text == s }
+            items.insert(Item(text: s, date: Date()), at: 0)
+        case .image(let png):
+            let h = sha256(png)
+            if let i = items.firstIndex(where: { $0.hash == h }) {
+                var existing = items.remove(at: i)
+                existing.date = Date()
+                items.insert(existing, at: 0)
+            } else {
+                let name = UUID().uuidString + ".png"
+                let rep = NSBitmapImageRep(data: png)
+                imageCache[name] = png
+                items.insert(Item(image: name, hash: h, width: rep?.pixelsWide, height: rep?.pixelsHigh, date: Date()), at: 0)
+            }
+        }
+        trim()
         scheduleSave()
+    }
+
+    func trim() {
+        if items.count > maxItems { items.removeLast(items.count - maxItems) }
+        var seen = 0
+        items.removeAll { item in
+            guard item.isImage else { return false }
+            seen += 1
+            return seen > maxImages
+        }
+        let live = Set(items.compactMap(\.image))
+        imageCache = imageCache.filter { live.contains($0.key) }
+    }
+
+    func imageData(_ item: Item) -> Data? {
+        guard let name = item.image else { return nil }
+        if let d = imageCache[name] { return d }
+        let d = try? Data(contentsOf: imageURL(name))
+        if let d = d { imageCache[name] = d }
+        return d
+    }
+
+    func content(of item: Item) -> Content? {
+        if let t = item.text { return .text(t) }
+        return imageData(item).map { .image($0) }
     }
 
     // MARK: Persistence
@@ -207,7 +322,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func load() {
         guard persist, let data = try? Data(contentsOf: storeURL),
               let saved = try? JSONDecoder().decode([Item].self, from: data) else { return }
-        items = Array(saved.prefix(maxItems))
+        items = saved.filter { $0.text != nil || $0.image != nil }
+        trim()
     }
 
     func scheduleSave() {
@@ -218,11 +334,21 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func save() {
         let fm = FileManager.default
         guard persist else {
-            try? fm.removeItem(at: storeURL)
+            try? fm.removeItem(at: storeDir)
             return
         }
-        try? fm.createDirectory(at: storeDir, withIntermediateDirectories: true,
+        try? fm.createDirectory(at: imagesDir, withIntermediateDirectories: true,
                                 attributes: [.posixPermissions: 0o700])
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: storeDir.path)
+        let live = Set(items.compactMap(\.image))
+        for name in live where !fm.fileExists(atPath: imageURL(name).path) {
+            guard let d = imageCache[name] else { continue }
+            try? d.write(to: imageURL(name), options: .atomic)
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: imageURL(name).path)
+        }
+        for name in (try? fm.contentsOfDirectory(atPath: imagesDir.path)) ?? [] where !live.contains(name) {
+            try? fm.removeItem(at: imageURL(name))
+        }
         guard let data = try? JSONEncoder().encode(items) else { return }
         try? data.write(to: storeURL, options: .atomic)
         try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: storeURL.path)
@@ -230,12 +356,28 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Menu
 
-    func label(_ text: String) -> String {
+    func label(_ item: Item) -> String {
+        if item.isImage {
+            if let w = item.width, let h = item.height { return "Image \(w)×\(h)" }
+            return "Image"
+        }
+        let text = item.text ?? ""
         let firstLine = text.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .first { !$0.isEmpty } ?? ""
         let collapsed = firstLine.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         return collapsed.count > 60 ? String(collapsed.prefix(60)) + "…" : collapsed
+    }
+
+    func thumbnail(_ item: Item) -> NSImage? {
+        guard let d = imageData(item), let img = NSImage(data: d) else { return nil }
+        let h: CGFloat = 18
+        let w = max(1, min(48, img.size.width * h / max(1, img.size.height)))
+        let thumb = NSImage(size: NSSize(width: w, height: h), flipped: false) { rect in
+            img.draw(in: rect)
+            return true
+        }
+        return thumb
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) { rebuildMenu() }
@@ -248,12 +390,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(empty)
         }
         for (i, item) in items.prefix(menuItemCount).enumerated() {
-            let mi = NSMenuItem(title: label(item.text), action: #selector(pick(_:)),
+            let mi = NSMenuItem(title: label(item), action: #selector(pick(_:)),
                                 keyEquivalent: i < 9 ? String(i + 1) : "")
             mi.keyEquivalentModifierMask = []
             mi.tag = i
             mi.target = self
-            mi.toolTip = String(item.text.prefix(1000))
+            if item.isImage {
+                mi.image = thumbnail(item)
+            } else {
+                mi.toolTip = String((item.text ?? "").prefix(1000))
+            }
             menu.addItem(mi)
         }
         menu.addItem(.separator())
@@ -266,7 +412,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         addToggle("Paste Directly (needs Accessibility)", #selector(requestAccessibility), on: AXIsProcessTrusted())
         addToggle("Launch at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         menu.addItem(.separator())
-        let hint = NSMenuItem(title: "Shift-Cmd-V: hold ⌘, tap V to cycle, release to paste", action: nil, keyEquivalent: "")
+        let hint = NSMenuItem(title: "Shift-Cmd-V: hold ⌘, tap V or arrows to cycle, release to paste", action: nil, keyEquivalent: "")
         hint.isEnabled = false
         menu.addItem(hint)
         menu.addItem(NSMenuItem(title: "Quit Clipwatch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -281,12 +427,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func pick(_ sender: NSMenuItem) {
         guard items.indices.contains(sender.tag) else { return }
-        pasteOut(items[sender.tag].text)
+        pasteOut(items[sender.tag])
     }
 
-    /// Put text on the clipboard and, if allowed, paste it into the front app.
-    func pasteOut(_ text: String) {
-        setClipboard(text)
+    /// Put an item on the clipboard and, if allowed, paste it into the front app.
+    func pasteOut(_ item: Item) {
+        guard let c = content(of: item) else { return }
+        setClipboard(c)
         if AXIsProcessTrusted() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { self.sendCommandV() }
         }
@@ -294,7 +441,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func togglePause() { defaults.set(!paused, forKey: "paused") }
     @objc func togglePersist() { defaults.set(!persist, forKey: "persist"); save() }
-    @objc func clearHistory() { items.removeAll(); save() }
+    @objc func clearHistory() { items.removeAll(); imageCache.removeAll(); save() }
 
     @objc func requestAccessibility() {
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
@@ -348,14 +495,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func updateBezel() {
         guard items.indices.contains(bezelIndex) else { return hideBezel() }
-        bezel.show(text: items[bezelIndex].text, index: bezelIndex, count: items.count)
+        let item = items[bezelIndex]
+        let image = item.isImage ? imageData(item).flatMap { NSImage(data: $0) } : nil
+        bezel.show(text: item.text, image: image, index: bezelIndex, count: items.count)
     }
 
     func commitBezel() {
         guard bezel.isVisible else { return }
-        let text = items.indices.contains(bezelIndex) ? items[bezelIndex].text : nil
+        let item = items.indices.contains(bezelIndex) ? items[bezelIndex] : nil
         hideBezel()
-        if let text = text { pasteOut(text) }
+        if let item = item { pasteOut(item) }
     }
 
     func hideBezel() {
