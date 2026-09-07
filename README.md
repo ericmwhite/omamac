@@ -24,8 +24,11 @@ Requires macOS 13 or later and Xcode (or the Command Line Tools) to build.
 That compiles `Clipwatch.app`, ad-hoc signs it, copies it to `~/Applications`,
 and starts it. A clipboard icon appears in the menu bar.
 
-- Click the icon, or press **Shift-Cmd-V** anywhere, to see recent items.
-- Pick an item (click, arrow keys and Return, or keys 1 to 9) to copy it. If
+- Click the icon to see recent items in a menu.
+- **Shift-Cmd-V** works like Flycut: an overlay shows the newest item, each further
+  tap of V (with Cmd still held) moves one item older, and releasing Cmd pastes
+  the one showing. Escape cancels, arrow keys also move.
+- Picking from the menu copies the item. If
   you enable **Paste Directly** and grant Accessibility access, it is also
   pasted into the app you were using.
 - **Pause Recording**, **Clear History**, **Remember History Across Restarts**,

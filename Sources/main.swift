@@ -71,6 +71,80 @@ struct Item: Codable {
     var date: Date
 }
 
+/// The overlay shown while cycling with Shift-Cmd-V. It is a non-activating
+/// panel: it takes keyboard input without stealing focus from the app you are
+/// pasting into.
+final class Bezel: NSPanel {
+    let body = NSTextField(wrappingLabelWithString: "")
+    let counter = NSTextField(labelWithString: "")
+    var onMove: ((Int) -> Void)?
+    var onCommit: (() -> Void)?
+    var onCancel: (() -> Void)?
+
+    init() {
+        let rect = NSRect(x: 0, y: 0, width: 560, height: 320)
+        super.init(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel],
+                   backing: .buffered, defer: false)
+        level = .floating
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+        isFloatingPanel = true
+        hidesOnDeactivate = false
+        appearance = NSAppearance(named: .darkAqua)
+
+        let effect = NSVisualEffectView(frame: rect)
+        effect.material = .hudWindow
+        effect.state = .active
+        effect.wantsLayer = true
+        effect.layer?.cornerRadius = 18
+        effect.layer?.masksToBounds = true
+        contentView = effect
+
+        body.frame = NSRect(x: 28, y: 56, width: rect.width - 56, height: rect.height - 84)
+        body.font = .systemFont(ofSize: 16)
+        body.textColor = .labelColor
+        body.maximumNumberOfLines = 11
+        body.lineBreakMode = .byTruncatingTail
+        body.cell?.truncatesLastVisibleLine = true
+        effect.addSubview(body)
+
+        counter.frame = NSRect(x: 28, y: 20, width: rect.width - 56, height: 20)
+        counter.font = .systemFont(ofSize: 12)
+        counter.textColor = .secondaryLabelColor
+        counter.alignment = .center
+        effect.addSubview(counter)
+    }
+
+    override var canBecomeKey: Bool { true }
+
+    func show(text: String, index: Int, count: Int) {
+        body.stringValue = text
+        counter.stringValue = "\(index + 1) of \(count)   ·   tap V for older, release ⌘ to paste, esc to cancel"
+        if !isVisible, let screen = NSScreen.main {
+            let f = screen.visibleFrame
+            setFrameOrigin(NSPoint(x: f.midX - frame.width / 2, y: f.midY - frame.height / 2))
+            makeKeyAndOrderFront(nil)
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let cmd = event.modifierFlags.contains(.command)
+        switch Int(event.keyCode) {
+        case kVK_Escape: onCancel?()
+        case kVK_Return, kVK_ANSI_KeypadEnter: onCommit?()
+        case kVK_DownArrow: onMove?(1)
+        case kVK_UpArrow: onMove?(-1)
+        case kVK_ANSI_V where !cmd: onMove?(1)   // with ⌘ held the hot key handles it
+        default: break
+        }
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        if !event.modifierFlags.contains(.command) { onCommit?() }
+    }
+}
+
 final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let pb = NSPasteboard.general
     let defaults = UserDefaults.standard
@@ -81,8 +155,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var pollTimer: Timer?
     var saveTimer: Timer?
     var hotKeyRef: EventHotKeyRef?
-    var previousApp: NSRunningApplication?
-    var pickedFromPopup = false
+    let bezel = Bezel()
+    var bezelIndex = 0
+    var modifierWatch: Timer?
 
     var maxItems: Int { max(1, defaults.object(forKey: "maxItems") as? Int ?? 100) }
     var menuItemCount: Int { max(1, defaults.object(forKey: "menuItems") as? Int ?? 30) }
@@ -104,6 +179,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.poll() }
         registerHotKey()
+        bezel.onMove = { [weak self] d in self?.moveBezel(d) }
+        bezel.onCommit = { [weak self] in self?.commitBezel() }
+        bezel.onCancel = { [weak self] in self?.hideBezel() }
     }
 
     // MARK: Recording
@@ -188,7 +266,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         addToggle("Paste Directly (needs Accessibility)", #selector(requestAccessibility), on: AXIsProcessTrusted())
         addToggle("Launch at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         menu.addItem(.separator())
-        let hint = NSMenuItem(title: "Shift-Cmd-V opens this list anywhere", action: nil, keyEquivalent: "")
+        let hint = NSMenuItem(title: "Shift-Cmd-V: hold ⌘, tap V to cycle, release to paste", action: nil, keyEquivalent: "")
         hint.isEnabled = false
         menu.addItem(hint)
         menu.addItem(NSMenuItem(title: "Quit Clipwatch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -203,14 +281,14 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func pick(_ sender: NSMenuItem) {
         guard items.indices.contains(sender.tag) else { return }
-        let text = items[sender.tag].text
+        pasteOut(items[sender.tag].text)
+    }
+
+    /// Put text on the clipboard and, if allowed, paste it into the front app.
+    func pasteOut(_ text: String) {
         setClipboard(text)
-        pickedFromPopup = true
-        let target = previousApp
-        previousApp = nil
-        if let target = target { target.activate() }
         if AXIsProcessTrusted() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.sendCommandV() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { self.sendCommandV() }
         }
     }
 
@@ -232,13 +310,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    // MARK: Popup hot key (Shift-Cmd-V, like Flycut)
+    // MARK: Cycling with Shift-Cmd-V (Flycut style)
 
     func registerHotKey() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         let me = Unmanaged.passUnretained(self).toOpaque()
         InstallEventHandler(GetApplicationEventTarget(), { _, _, userData in
-            Unmanaged<App>.fromOpaque(userData!).takeUnretainedValue().showPopup()
+            Unmanaged<App>.fromOpaque(userData!).takeUnretainedValue().hotKeyPressed()
             return noErr
         }, 1, &spec, me, nil)
         let id = EventHotKeyID(signature: 0x434C5057, id: 1) // "CLPW"
@@ -246,20 +324,44 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                             GetApplicationEventTarget(), 0, &hotKeyRef)
     }
 
-    func showPopup() {
-        previousApp = NSWorkspace.shared.frontmostApplication
-        pickedFromPopup = false
-        NSApp.activate(ignoringOtherApps: true)
-        rebuildMenu()
-        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    /// First press shows the newest item; each further press while ⌘ is held
+    /// moves one item older. Releasing ⌘ pastes whatever is showing.
+    func hotKeyPressed() {
+        guard !items.isEmpty else { return }
+        if bezel.isVisible {
+            moveBezel(1)
+        } else {
+            bezelIndex = 0
+            updateBezel()
+            // Backup for a ⌘ release that lands before the panel is key.
+            modifierWatch = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+                if !NSEvent.modifierFlags.contains(.command) { self?.commitBezel() }
+            }
+        }
     }
 
-    func menuDidClose(_ menu: NSMenu) {
-        // Popup dismissed without a pick: hand focus back to where it was.
-        if !pickedFromPopup, let prev = previousApp {
-            previousApp = nil
-            DispatchQueue.main.async { prev.activate() }
-        }
+    func moveBezel(_ delta: Int) {
+        guard !items.isEmpty else { return hideBezel() }
+        bezelIndex = ((bezelIndex + delta) % items.count + items.count) % items.count
+        updateBezel()
+    }
+
+    func updateBezel() {
+        guard items.indices.contains(bezelIndex) else { return hideBezel() }
+        bezel.show(text: items[bezelIndex].text, index: bezelIndex, count: items.count)
+    }
+
+    func commitBezel() {
+        guard bezel.isVisible else { return }
+        let text = items.indices.contains(bezelIndex) ? items[bezelIndex].text : nil
+        hideBezel()
+        if let text = text { pasteOut(text) }
+    }
+
+    func hideBezel() {
+        modifierWatch?.invalidate()
+        modifierWatch = nil
+        bezel.orderOut(nil)
     }
 
     func sendCommandV() {
