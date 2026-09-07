@@ -44,8 +44,8 @@
 
   <!-- stats row -->
   <g font-size="20" fill="#9aa5b1">
-    <text x="80" y="540" font-size="64" font-weight="700" fill="#f2f4f6">638</text><text x="80" y="572">lines, everything included</text>
-    <text x="460" y="540" font-size="64" font-weight="700" fill="#f2f4f6">6</text><text x="460" y="572">commits</text>
+    <text x="80" y="540" font-size="64" font-weight="700" fill="#f2f4f6">686</text><text x="80" y="572">lines, everything included</text>
+    <text x="460" y="540" font-size="64" font-weight="700" fill="#f2f4f6">8</text><text x="460" y="572">commits</text>
     <text x="700" y="540" font-size="64" font-weight="700" fill="#f2f4f6">0</text><text x="700" y="572">network code in the app</text>
     <text x="1060" y="540" font-size="64" font-weight="700" fill="#f2f4f6">~0%</text><text x="1060" y="572">CPU while idle</text>
   </g>

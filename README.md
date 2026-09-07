@@ -1,5 +1,7 @@
 # OmaMac
 
+![OmaMac: one clipboard across Omarchy, a Mac, and an iPhone](docs/omamac-card.png)
+
 One clipboard across a Linux desktop and a Mac. Copy on either machine, paste
 on the other. Text and images. If your Mac and iPhone share an Apple ID,
 Universal Clipboard carries it on to the phone for free.
