@@ -8,7 +8,13 @@ mkdir -p "$APP/Contents/MacOS"
 swiftc -O -o "$APP/Contents/MacOS/Clipwatch" Sources/main.swift \
   -framework AppKit -framework Carbon -framework ServiceManagement
 cp Info.plist "$APP/Contents/Info.plist"
-codesign --force --sign - "$APP"
+# Sign with a real certificate when one exists. macOS ties Accessibility
+# permission to the signing identity, and an ad-hoc signature changes on every
+# build, so an ad-hoc-signed app loses "Paste Directly" each time you rebuild.
+SIGN_ID="${CLIPWATCH_SIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null \
+  | grep -oE '"(Developer ID Application|Apple Development)[^"]*"' | head -1 | tr -d '"')}"
+codesign --force --sign "${SIGN_ID:--}" "$APP"
+echo "signed as: ${SIGN_ID:-ad-hoc}"
 if [ "${1:-}" = "install" ]; then
   mkdir -p ~/Applications
   pkill -x Clipwatch || true
