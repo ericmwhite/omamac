@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Two-way text clipboard sync between this machine and the Mac, over SSH (Tailscale).
+# Linux -> Mac: wl-paste --watch pushes every clipboard change to `Clipwatch set`.
+# Mac -> Linux: one long-lived SSH session runs `Clipwatch stream`, which prints a
+#   base64 line whenever the Mac clipboard changes. Nothing polls from this side.
+# A shared "last" file records whatever was synced most recently, in either
+# direction, so nothing bounces back and forth.
+# Clipwatch lives in ~/Projects/clipwatch and is installed on the Mac in ~/Applications.
+set -u
+HOST="${CLIPSYNC_HOST:-erics-mac-mini}"
+CLIPWATCH="${CLIPSYNC_CLIPWATCH:-Applications/Clipwatch.app/Contents/MacOS/Clipwatch}"
+STATE="${XDG_RUNTIME_DIR:-/tmp}/clipsync-mac"
+mkdir -p "$STATE"
+LAST="$STATE/last"
+SSH=(ssh -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=3
+     -o ControlMaster=auto -o ControlPath="$STATE/ssh-%C" -o ControlPersist=300 "$HOST")
+
+# Called by wl-paste --watch with the new clipboard contents on stdin.
+if [ "${1:-}" = "--push" ]; then
+  [ "${CLIPBOARD_STATE:-}" = "sensitive" ] && exit 0   # password-manager copies stay local
+  cat > "$STATE/local"
+  [ -s "$STATE/local" ] || exit 0
+  cmp -s "$STATE/local" "$LAST" && exit 0
+  cp "$STATE/local" "$LAST"
+  "${SSH[@]}" "$CLIPWATCH" set < "$STATE/local"
+  exit 0
+fi
+
+: > "$LAST"
+wl-paste -n --type text --watch "$0" --push &
+WATCH=$!
+trap 'kill $WATCH 2>/dev/null; "${SSH[@]}" -O exit 2>/dev/null; exit 0' INT TERM
+
+# `Clipwatch stream` exits when its stdin closes (that is how it notices a dropped
+# SSH session), so feed it a fifo that stays open instead of systemd's /dev/null.
+rm -f "$STATE/keepalive"; mkfifo "$STATE/keepalive"; exec 3<>"$STATE/keepalive"
+
+while :; do
+  "${SSH[@]}" "$CLIPWATCH" stream <&3 | while IFS= read -r line; do
+    printf '%s' "$line" | base64 -d > "$STATE/remote" || continue
+    [ -s "$STATE/remote" ] || continue
+    cmp -s "$STATE/remote" "$LAST" && continue
+    cp "$STATE/remote" "$LAST"
+    wl-copy < "$STATE/remote"
+  done
+  sleep 10   # Mac unreachable or asleep: try again shortly
+done

@@ -1,0 +1,12 @@
+[Unit]
+Description=Two-way clipboard sync with the Mac mini over SSH
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/clipsync-mac
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target
