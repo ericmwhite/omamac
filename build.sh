@@ -17,8 +17,9 @@ codesign --force --sign "${SIGN_ID:--}" "$APP"
 echo "signed as: ${SIGN_ID:-ad-hoc}"
 if [ "${1:-}" = "install" ]; then
   mkdir -p ~/Applications
-  pkill -x Clipwatch || true
-  for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x Clipwatch >/dev/null || break; sleep 0.3; done
+  # Quit only the menu-bar app, not a "Clipwatch stream" helper an SSH session may be running.
+  pkill -f 'MacOS/Clipwatch$' || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -f 'MacOS/Clipwatch$' >/dev/null || break; sleep 0.3; done
   rm -rf ~/Applications/Clipwatch.app
   cp -R "$APP" ~/Applications/Clipwatch.app
   open -a ~/Applications/Clipwatch.app
